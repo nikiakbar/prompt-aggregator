@@ -68,3 +68,11 @@ def get_image_files(directory):
                 if f.lower().endswith(SUPPORTED_EXTENSIONS):
                     files.append(os.path.join(root, f))
     return files
+
+def get_image_files_generator(directory):
+    """Yields supported image files in the directory recursively (lazy iteration)."""
+    if os.path.isdir(directory):
+        for root, dirs, filenames in os.walk(directory):
+            for f in filenames:
+                if f.lower().endswith(SUPPORTED_EXTENSIONS):
+                    yield os.path.join(root, f)

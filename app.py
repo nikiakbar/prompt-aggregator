@@ -2,7 +2,7 @@ import gradio as gr
 import os
 import logging
 import sys
-from loader import get_image_files, extract_prompt
+from loader import get_image_files_generator, extract_prompt
 from parser import parse_prompt
 from aggregator import aggregate_tags
 from editor import delete_tags, rename_tag, merge_tags
@@ -15,7 +15,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("prompt-aggregator")
 
-def process_path(path):
+def process_path(path, progress=gr.Progress()):
     logger.info(f"Processing path: {path}")
     if not path:
         logger.warning("No path provided.")
@@ -24,15 +24,29 @@ def process_path(path):
         logger.error(f"Path does not exist: {path}")
         return f"Path does not exist: {path}", 0, [], "", {}
 
-    files = get_image_files(path)
-    logger.info(f"Found {len(files)} images in {path}")
-    tag_lists = []
-    for f in files:
+    # Lazy iteration: first pass to get total count for progress bar
+    total_files = sum(1 for _ in get_image_files_generator(path))
+    logger.info(f"Found {total_files} images in {path}")
+
+    if total_files == 0:
+        return f"Current active path: {path}", 0, [], "", {}
+
+    tag_counts = {}
+    batch_size = 100
+
+    # Second pass: lazy iteration for processing
+    for i, f in enumerate(get_image_files_generator(path)):
         prompt = extract_prompt(f)
         tags = parse_prompt(prompt)
-        tag_lists.append(tags)
 
-    tag_counts = aggregate_tags(tag_lists)
+        # Update counts immediately (effectively batch processing if we yield/update UI in batches)
+        for tag in tags:
+            tag_counts[tag] = tag_counts.get(tag, 0) + 1
+
+        # Update progress and log in batches
+        if (i + 1) % batch_size == 0 or (i + 1) == total_files:
+            progress((i + 1) / total_files, desc=f"Processed {i + 1}/{total_files}")
+            logger.info(f"Progress: {i + 1}/{total_files} images processed")
 
     # Sort by count descending initially
     sorted_tags = sorted(tag_counts.items(), key=lambda x: x[1], reverse=True)
@@ -40,7 +54,7 @@ def process_path(path):
     df_data = [[False, tag, count] for tag, count in sorted_tags]
     preview = "\n".join([tag for tag, count in sorted_tags])
 
-    return f"Current active path: {path}", len(files), df_data, preview, tag_counts
+    return f"Current active path: {path}", total_files, df_data, preview, tag_counts
 
 def update_from_df(df_data):
     # df_data is a list of lists: [[Select, Tag, Count], ...]
