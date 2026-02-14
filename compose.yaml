@@ -4,6 +4,8 @@ services:
     ports:
       - "4000:4000"
     volumes:
+      # host folder ./data -> container /data (Input source for images)
       - ./data:/data
+      # host folder ./output -> container /output (Destination for exported wildcard.txt)
       - ./output:/output
     restart: unless-stopped
