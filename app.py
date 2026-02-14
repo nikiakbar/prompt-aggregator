@@ -128,7 +128,7 @@ with gr.Blocks(title="SD Prompt Tag Aggregator") as demo:
     with gr.Group():
         gr.Markdown("### Section A — Input")
         with gr.Row():
-            path_input = gr.Textbox(label="Directory Path", placeholder="/input/images", scale=4)
+            path_input = gr.Textbox(label="Directory Path", value="/input", placeholder="/input/images", scale=4)
             process_btn = gr.Button("Process", variant="primary", scale=1)
 
         with gr.Row():

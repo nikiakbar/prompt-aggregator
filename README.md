@@ -43,14 +43,14 @@ A Python application with a Gradio UI designed to aggregate Stable Diffusion pos
    - Select rows to **Delete**.
    - Select a single row to **Rename**.
    - Edit the **Tag** text directly in the table for quick corrections.
-4. **Export**: Click **Export to file** to save your wildcard list to `/data/wildcard.txt` inside the container (mapped to your host's `./output` folder).
+4. **Export**: Click **Export to file** to save your wildcard list to `/data/wildcard.txt` inside the container (mapped to your host's `./data` folder).
 
 ## Configuration
 
 The application uses Docker volume mounts defined in `compose.yaml`:
 
-- `./data:/input`: Maps your local image folder to the container's input path.
-- `./output:/data`: Maps the container's export folder to your local machine.
+- `./input:/input`: Maps your local image folder to the container's input path.
+- `./data:/data`: Maps the container's export folder to your local machine.
 
 ## Technical Details
 
