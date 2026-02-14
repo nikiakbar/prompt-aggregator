@@ -1,17 +1,31 @@
 import gradio as gr
 import os
+import logging
+import sys
 from loader import get_image_files, extract_prompt
 from parser import parse_prompt
 from aggregator import aggregate_tags
 from editor import delete_tags, rename_tag, merge_tags
 
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[logging.StreamHandler(sys.stdout)]
+)
+logger = logging.getLogger("prompt-aggregator")
+
 def process_path(path):
+    logger.info(f"Processing path: {path}")
     if not path:
+        logger.warning("No path provided.")
         return "Current active path: None", 0, [], "", {}
     if not os.path.exists(path):
+        logger.error(f"Path does not exist: {path}")
         return f"Path does not exist: {path}", 0, [], "", {}
 
     files = get_image_files(path)
+    logger.info(f"Found {len(files)} images in {path}")
     tag_lists = []
     for f in files:
         prompt = extract_prompt(f)
@@ -49,6 +63,7 @@ def update_from_df(df_data):
 
 def handle_delete(df_data, tag_counts):
     tags_to_delete = [row[1] for row in df_data if row[0]]
+    logger.info(f"Deleting tags: {tags_to_delete}")
     new_tag_counts = delete_tags(tag_counts, tags_to_delete)
 
     sorted_tags = sorted(new_tag_counts.items(), key=lambda x: x[1], reverse=True)
@@ -59,10 +74,12 @@ def handle_delete(df_data, tag_counts):
 def handle_rename(df_data, tag_counts, new_name):
     selected = [row[1] for row in df_data if row[0]]
     if len(selected) != 1:
+        logger.warning(f"Rename failed: {len(selected)} tags selected (exactly 1 required).")
         gr.Warning("Please select exactly one tag to rename.")
         return df_data, "\n".join(sorted(tag_counts.keys())), tag_counts
 
     old_name = selected[0]
+    logger.info(f"Renaming tag '{old_name}' to '{new_name}'")
     new_tag_counts = rename_tag(tag_counts, old_name, new_name)
 
     sorted_tags = sorted(new_tag_counts.items(), key=lambda x: x[1], reverse=True)
@@ -73,9 +90,11 @@ def handle_rename(df_data, tag_counts, new_name):
 def handle_merge(df_data, tag_counts, target_name):
     selected = [row[1] for row in df_data if row[0]]
     if not selected:
+        logger.warning("Merge failed: No tags selected.")
         gr.Warning("No tags selected to merge.")
         return df_data, "\n".join(sorted(tag_counts.keys())), tag_counts
 
+    logger.info(f"Merging tags {selected} into '{target_name}'")
     new_tag_counts = merge_tags(tag_counts, selected, target_name)
 
     sorted_tags = sorted(new_tag_counts.items(), key=lambda x: x[1], reverse=True)
@@ -85,15 +104,19 @@ def handle_merge(df_data, tag_counts, target_name):
 
 def export_to_file(tag_counts):
     if not tag_counts:
+        logger.warning("Export failed: No tags to export.")
         return "No tags to export."
     try:
         os.makedirs("/data", exist_ok=True)
         output_path = "/data/wildcard.txt"
+        logger.info(f"Exporting {len(tag_counts)} tags to {output_path}")
         sorted_tags = sorted(tag_counts.keys())
         with open(output_path, "w") as f:
             f.write("\n".join(sorted_tags))
+        logger.info("Export successful.")
         return f"Successfully exported to {output_path}"
     except Exception as e:
+        logger.error(f"Export failed: {e}")
         return f"Export failed: {e}"
 
 # UI Construction
@@ -182,4 +205,11 @@ with gr.Blocks(title="SD Prompt Tag Aggregator") as demo:
     )
 
 if __name__ == "__main__":
-    demo.launch(server_name="0.0.0.0", server_port=4000)
+    SERVER_NAME = "0.0.0.0"
+    PORT = 4000
+    logger.info("Starting Stable Diffusion Prompt Tag Aggregator")
+    logger.info(f"Configuration: SERVER_NAME={SERVER_NAME}, PORT={PORT}")
+    logger.info("Input volume mount expected at: /input")
+    logger.info("Output volume mount expected at: /data")
+
+    demo.launch(server_name=SERVER_NAME, server_port=PORT)

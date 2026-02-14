@@ -1,6 +1,9 @@
 import os
+import logging
 from PIL import Image
 from PIL.ExifTags import TAGS
+
+logger = logging.getLogger(__name__)
 
 SUPPORTED_EXTENSIONS = ('.png', '.webp', '.jpg', '.jpeg')
 
@@ -53,7 +56,7 @@ def extract_prompt(image_path):
 
             return prompt.strip()
     except Exception as e:
-        print(f"Error processing {image_path}: {e}")
+        logger.error(f"Error extracting prompt from {image_path}: {e}")
         return ""
 
 def get_image_files(directory):

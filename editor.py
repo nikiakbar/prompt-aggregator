@@ -1,3 +1,7 @@
+import logging
+
+logger = logging.getLogger(__name__)
+
 def delete_tags(tag_dict, tags_to_delete):
     """Deletes specified tags from the dictionary."""
     new_dict = tag_dict.copy()
