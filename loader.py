@@ -7,54 +7,85 @@ logger = logging.getLogger(__name__)
 
 SUPPORTED_EXTENSIONS = ('.png', '.webp', '.jpg', '.jpeg')
 
+import json
+
 def extract_prompt(image_path):
     """
-    Extracts the positive prompt from image metadata.
-    Supported: A1111 (parameters), ComfyUI (prompt), and EXIF UserComment for JPEG.
+    Robustly extracts the positive prompt from image metadata.
+    Supports A1111, ComfyUI, and various EXIF/IPTC formats.
     """
     try:
         with Image.open(image_path) as img:
             info = img.info
-            prompt = ""
+            meta_sources = []
 
-            # Case 1: PNG/WebP with 'parameters' (A1111)
-            if 'parameters' in info:
-                params = info['parameters']
-                if 'Negative prompt:' in params:
-                    prompt = params.split('Negative prompt:')[0]
-                elif 'Steps:' in params:
-                    prompt = params.split('Steps:')[0]
-                else:
-                    prompt = params
-            # Case 2: PNG/WebP with 'prompt'
-            elif 'prompt' in info:
-                prompt = info['prompt']
-            # Case 3: JPEG or others with EXIF
-            else:
+            # 1. Collect all candidates from img.info (PNG, WebP chunks)
+            for k, v in info.items():
+                try:
+                    # Handle both string and bytes keys
+                    key = k.decode('utf-8', errors='ignore').lower() if isinstance(k, bytes) else str(k).lower()
+                    if key in ['parameters', 'prompt', 'comment', 'description', 'usercomment']:
+                        val = v.decode('utf-8', errors='ignore') if isinstance(v, bytes) else str(v)
+                        if val.strip():
+                            meta_sources.append(val.strip())
+                except:
+                    continue
+
+            # 2. Collect from EXIF (JPEG, WebP)
+            try:
                 exif = img.getexif()
                 if exif:
-                    for tag_id in exif:
+                    for tag_id, value in exif.items():
                         tag_name = TAGS.get(tag_id, tag_id)
-                        if tag_name == 'UserComment':
-                            value = exif.get(tag_id)
+                        if tag_name in ['UserComment', 'ImageDescription', 'Software', 'Comment']:
                             if isinstance(value, bytes):
-                                # Strip potential encoding prefix (e.g., ASCII\x00\x00\x00)
+                                # Strip common EXIF encoding prefixes
                                 if value.startswith(b'ASCII\x00\x00\x00'):
-                                    value = value[8:].decode('utf-8', errors='ignore')
+                                    decoded = value[8:].decode('utf-8', errors='ignore')
                                 elif value.startswith(b'UNICODE\x00'):
-                                    value = value[8:].decode('utf-16', errors='ignore')
+                                    decoded = value[8:].decode('utf-16', errors='ignore')
                                 else:
-                                    value = value.decode('utf-8', errors='ignore')
-
-                            if 'Negative prompt:' in value:
-                                prompt = value.split('Negative prompt:')[0]
-                            elif 'Steps:' in value:
-                                prompt = value.split('Steps:')[0]
+                                    decoded = value.decode('utf-8', errors='ignore')
                             else:
-                                prompt = value
-                            break
+                                decoded = str(value)
+                            if decoded.strip():
+                                meta_sources.append(decoded.strip())
+            except:
+                pass
 
-            return prompt.strip()
+            if not meta_sources:
+                return ""
+
+            # 3. Process candidates to find the actual prompt
+            for candidate in meta_sources:
+                # Case A: A1111/Standard parameters string
+                if 'Negative prompt:' in candidate or 'Steps:' in candidate:
+                    if 'Negative prompt:' in candidate:
+                        return candidate.split('Negative prompt:')[0].strip()
+                    return candidate.split('Steps:')[0].strip()
+
+                # Case B: ComfyUI JSON
+                if candidate.startswith('{') and '"inputs"' in candidate:
+                    try:
+                        data = json.loads(candidate)
+                        prompts = []
+                        # Heuristic: find CLIPTextEncode or similar nodes
+                        for node in data.values():
+                            if isinstance(node, dict) and 'inputs' in node:
+                                text = node['inputs'].get('text')
+                                if isinstance(text, str) and len(text) > 3:
+                                    # Avoid common non-prompt inputs
+                                    if not any(x in text.lower() for x in ['embedding:', 'checkpoint']):
+                                        prompts.append(text)
+                        if prompts:
+                            # Return the longest one (usually the positive prompt)
+                            return max(prompts, key=len).strip()
+                    except:
+                        pass
+
+            # Fallback: Return the longest candidate that isn't a short technical string
+            # This handles cases where 'prompt' key is used directly as a string.
+            return max(meta_sources, key=len).strip()
     except Exception as e:
         logger.error(f"Error extracting prompt from {image_path}: {e}")
         return ""

@@ -16,14 +16,18 @@ def normalize_tag(tag):
     # Lowercase
     tag = tag.lower()
 
-    # Remove weight suffix like :1.2
-    tag = re.sub(r':[0-9.]+', '', tag)
+    # Remove weight suffix like : 1.2 or :1.2 (handling optional spaces)
+    tag = re.sub(r':\s*[0-9.]+', '', tag)
 
     # Remove wrapping parentheses, brackets, and braces
     # Using strip for multiple layers like (((tag)))
-    tag = tag.strip('()[]{} ')
+    # We strip them iteratively to handle messy nesting
+    last_tag = None
+    while tag != last_tag:
+        last_tag = tag
+        tag = tag.strip('()[]{} \n\r\t')
 
-    return tag.strip()
+    return tag
 
 def parse_prompt(prompt):
     """
