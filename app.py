@@ -2,6 +2,7 @@ import gradio as gr
 import os
 import logging
 import sys
+import json
 from loader import get_image_files_generator, extract_prompt
 from parser import parse_prompt
 from aggregator import aggregate_tags
@@ -133,6 +134,42 @@ def export_to_file(tag_counts):
         logger.error(f"Export failed: {e}")
         return f"Export failed: {e}"
 
+def save_app_state(tag_counts):
+    if not tag_counts:
+        logger.warning("Save state failed: No data to save.")
+        return "No data to save."
+    try:
+        os.makedirs("/data", exist_ok=True)
+        state_path = "/data/state.json"
+        logger.info(f"Saving app state to {state_path}")
+        with open(state_path, "w") as f:
+            json.dump(tag_counts, f, indent=2)
+        logger.info("Save state successful.")
+        return f"State saved to {state_path}"
+    except Exception as e:
+        logger.error(f"Save state failed: {e}")
+        return f"Save failed: {e}"
+
+def load_app_state():
+    state_path = "/data/state.json"
+    if not os.path.exists(state_path):
+        logger.warning(f"Load state failed: {state_path} does not exist.")
+        return {}, [], "", f"File not found: {state_path}"
+    try:
+        logger.info(f"Loading app state from {state_path}")
+        with open(state_path, "r") as f:
+            tag_counts = json.load(f)
+
+        sorted_tags = sorted(tag_counts.items(), key=lambda x: x[1], reverse=True)
+        df_data = [[False, tag, count] for tag, count in sorted_tags]
+        preview = "\n".join([tag for tag, count in sorted_tags])
+
+        logger.info("Load state successful.")
+        return tag_counts, df_data, preview, f"State loaded from {state_path}"
+    except Exception as e:
+        logger.error(f"Load state failed: {e}")
+        return {}, [], "", f"Load failed: {e}"
+
 # UI Construction
 with gr.Blocks(title="SD Prompt Tag Aggregator") as demo:
     tag_counts_state = gr.State({})
@@ -167,9 +204,12 @@ with gr.Blocks(title="SD Prompt Tag Aggregator") as demo:
             delete_btn = gr.Button("Delete selected tags", variant="stop")
 
     with gr.Group():
-        gr.Markdown("### Section C — Output")
+        gr.Markdown("### Section C — Output & Persistence")
         preview_area = gr.TextArea(label="Wildcard List Preview", interactive=False, lines=10)
-        export_btn = gr.Button("Export to file", variant="primary")
+        with gr.Row():
+            export_btn = gr.Button("Export Wildcard List", variant="primary")
+            save_state_btn = gr.Button("Save State", variant="secondary")
+            load_state_btn = gr.Button("Load State", variant="secondary")
         export_status = gr.Markdown("")
 
     # Event Handlers
@@ -216,6 +256,21 @@ with gr.Blocks(title="SD Prompt Tag Aggregator") as demo:
         export_to_file,
         inputs=[tag_counts_state],
         outputs=[export_status]
+    )
+
+    save_state_btn.click(
+        save_app_state,
+        inputs=[tag_counts_state],
+        outputs=[export_status]
+    )
+
+    def on_load_click():
+        tag_counts, df_data, preview, status = load_app_state()
+        return tag_counts, df_data, preview, status
+
+    load_state_btn.click(
+        on_load_click,
+        outputs=[tag_counts_state, tag_table, preview_area, export_status]
     )
 
 if __name__ == "__main__":
