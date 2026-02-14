@@ -57,10 +57,11 @@ def extract_prompt(image_path):
         return ""
 
 def get_image_files(directory):
-    """Returns a list of supported image files in the directory."""
+    """Returns a list of supported image files in the directory recursively."""
     files = []
     if os.path.isdir(directory):
-        for f in os.listdir(directory):
-            if f.lower().endswith(SUPPORTED_EXTENSIONS):
-                files.append(os.path.join(directory, f))
+        for root, dirs, filenames in os.walk(directory):
+            for f in filenames:
+                if f.lower().endswith(SUPPORTED_EXTENSIONS):
+                    files.append(os.path.join(root, f))
     return files
