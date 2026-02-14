@@ -36,21 +36,21 @@ A Python application with a Gradio UI designed to aggregate Stable Diffusion pos
 
 ## Usage Workflow
 
-1. **Input**: Enter the directory path inside the container (default is `/data`) and click **Process**.
+1. **Input**: Enter the directory path inside the container (default is `/input`) and click **Process**.
 2. **Review**: See the aggregated tags and their counts in the interactive table.
 3. **Refine**:
    - Select rows to **Merge** into a new tag name.
    - Select rows to **Delete**.
    - Select a single row to **Rename**.
    - Edit the **Tag** text directly in the table for quick corrections.
-4. **Export**: Click **Export to file** to save your wildcard list to `/output/wildcard.txt` on your host machine.
+4. **Export**: Click **Export to file** to save your wildcard list to `/data/wildcard.txt` inside the container (mapped to your host's `./output` folder).
 
 ## Configuration
 
 The application uses Docker volume mounts defined in `compose.yaml`:
 
-- `./data:/data`: Maps your local image folder to the container's input path.
-- `./output:/output`: Maps the container's export folder to your local machine.
+- `./data:/input`: Maps your local image folder to the container's input path.
+- `./output:/data`: Maps the container's export folder to your local machine.
 
 ## Technical Details
 

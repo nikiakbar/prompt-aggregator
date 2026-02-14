@@ -87,8 +87,8 @@ def export_to_file(tag_counts):
     if not tag_counts:
         return "No tags to export."
     try:
-        os.makedirs("/output", exist_ok=True)
-        output_path = "/output/wildcard.txt"
+        os.makedirs("/data", exist_ok=True)
+        output_path = "/data/wildcard.txt"
         sorted_tags = sorted(tag_counts.keys())
         with open(output_path, "w") as f:
             f.write("\n".join(sorted_tags))
@@ -105,7 +105,7 @@ with gr.Blocks(title="SD Prompt Tag Aggregator") as demo:
     with gr.Group():
         gr.Markdown("### Section A — Input")
         with gr.Row():
-            path_input = gr.Textbox(label="Directory Path", placeholder="/data/images", scale=4)
+            path_input = gr.Textbox(label="Directory Path", placeholder="/input/images", scale=4)
             process_btn = gr.Button("Process", variant="primary", scale=1)
 
         with gr.Row():
