@@ -9,10 +9,30 @@ logger = logging.getLogger(__name__)
 
 SUPPORTED_EXTENSIONS = ('.png', '.webp', '.jpg', '.jpeg')
 
+# Keywords commonly found in negative prompts
+NEGATIVE_KEYWORDS = [
+    'lowres', 'bad anatomy', 'bad hands', 'text', 'error', 'missing fingers',
+    'extra digit', 'fewer digits', 'cropped', 'worst quality', 'low quality',
+    'normal quality', 'jpeg artifacts', 'signature', 'watermark', 'username',
+    'blurry', 'bad feet', 'easynegative', 'ng_deepnegative', 'bad-hands-5',
+    'bad_prompt', 'extra limbs', 'mutation'
+]
+
+def is_likely_negative(text):
+    """Heuristic to check if a string is likely a negative prompt."""
+    if not text:
+        return False
+    text_lower = text.lower()
+    # If it contains "negative" it's a strong hint if it's a short label,
+    # but here we check for common negative prompt content.
+    match_count = sum(1 for word in NEGATIVE_KEYWORDS if word in text_lower)
+    # If it contains more than 2 negative keywords, it's very likely negative
+    return match_count >= 2
+
 def extract_prompt(image_path):
     """
-    Robustly extracts the positive prompt from image metadata.
-    Handles A1111, ComfyUI, InvokeAI, NovelAI and more.
+    Robustly extracts ONLY the positive prompt from image metadata.
+    Specifically designed to ignore negative prompts and technical parameters.
     """
     try:
         with Image.open(image_path) as img:
@@ -38,7 +58,6 @@ def extract_prompt(image_path):
                         if isinstance(tag_name, str):
                             key = tag_name.lower()
                             if isinstance(value, bytes):
-                                # Strip common EXIF encoding prefixes
                                 if value.startswith(b'ASCII\x00\x00\x00'):
                                     decoded = value[8:].decode('utf-8', errors='ignore')
                                 elif value.startswith(b'UNICODE\x00'):
@@ -55,12 +74,12 @@ def extract_prompt(image_path):
             if not all_metadata:
                 return ""
 
-            # 3. Strategy: Look for A1111-style parameters in ANY field
+            # 3. Strategy: Look for A1111-style parameters string
+            # This is the most common format where pos and neg are in one field.
             for key, val in all_metadata.items():
                 v_lower = val.lower()
-                # Check for common markers in A1111 parameters string
                 if 'negative prompt:' in v_lower or 'steps:' in v_lower:
-                    # Case-insensitive split
+                    # POSITIVE prompt is ALWAYS before "Negative prompt:" or "Steps:"
                     if 'negative prompt:' in v_lower:
                         parts = re.split(r'negative prompt:', val, flags=re.IGNORECASE)
                         return parts[0].strip()
@@ -68,16 +87,15 @@ def extract_prompt(image_path):
                         parts = re.split(r'steps:', val, flags=re.IGNORECASE)
                         return parts[0].strip()
 
-            # 4. Strategy: Look for ComfyUI/JSON in specific keys
-            # ComfyUI often uses 'prompt' or 'workflow'. InvokeAI uses 'sd_metadata'.
+            # 4. Strategy: Look for ComfyUI/JSON
             for key in ['prompt', 'workflow', 'sd_metadata', 'sd-metadata', 'metadata']:
                 val = all_metadata.get(key)
                 if val and val.strip().startswith('{'):
                     try:
                         data = json.loads(val)
                         if isinstance(data, dict):
-                            # ComfyUI heuristic: look for CLIPTextEncode nodes
-                            prompts = []
+                            # ComfyUI heuristic: find CLIPTextEncode nodes
+                            candidates = []
                             for node in data.values():
                                 if isinstance(node, dict) and 'inputs' in node:
                                     inputs = node['inputs']
@@ -85,39 +103,46 @@ def extract_prompt(image_path):
                                     if isinstance(txt, str) and len(txt) > 3:
                                         # Filter out technical stuff
                                         if not any(x in txt.lower() for x in ['embedding:', 'checkpoint', 'lora:']):
-                                            prompts.append(txt)
-                            if prompts:
-                                return max(prompts, key=len).strip()
+                                            candidates.append(txt)
 
-                            # InvokeAI/Generic JSON prompt keys
-                            for p_key in ['positive_prompt', 'prompt', 'text']:
-                                if p_key in data and isinstance(data[p_key], str):
-                                    return data[p_key].strip()
+                            if candidates:
+                                # Filter out likely negative candidates
+                                positive_candidates = [c for c in candidates if not is_likely_negative(c)]
+                                if positive_candidates:
+                                    return max(positive_candidates, key=len).strip()
+                                # Fallback to longest if all look negative or none look negative
+                                return max(candidates, key=len).strip()
+
+                            # InvokeAI/Generic JSON
+                            if 'positive_prompt' in data:
+                                return str(data['positive_prompt']).strip()
                     except:
                         pass
 
             # 5. Strategy: Check priority keys for plain text
+            # We must be careful not to pick a negative prompt if it's in one of these keys.
             priority_keys = ['parameters', 'prompt', 'description', 'comment', 'usercomment', 'dream', 'software']
             for key in priority_keys:
                 val = all_metadata.get(key)
                 if val:
-                    # InvokeAI legacy 'dream' format
+                    # InvokeAI legacy
                     if '--' in val and any(x in val for x in ['--steps', '--cfg', '--seed']):
                         return val.split('--')[0].strip()
 
-                    # If not JSON, assume it's the prompt
                     if not (val.startswith('{') or val.startswith('[')):
-                        if len(val) > 2:
+                        if len(val) > 2 and not is_likely_negative(val):
                             return val.strip()
 
-            # 6. Fallback: return the longest non-JSON string found anywhere
-            non_json_meta = [v for v in all_metadata.values() if not (v.startswith('{') or v.startswith('['))]
-            if non_json_meta:
-                # Filter out likely technical tags
-                candidates = [v for v in non_json_meta if len(v.split()) > 1]
-                if candidates:
-                    return max(candidates, key=len).strip()
-                return max(non_json_meta, key=len).strip()
+            # 6. Fallback: return the longest string that doesn't look negative
+            candidates = [v for v in all_metadata.values() if not (v.startswith('{') or v.startswith('['))]
+            candidates = [v for v in candidates if len(v.split()) > 1] # Must be at least 2 words
+
+            positive_candidates = [c for c in candidates if not is_likely_negative(c)]
+            if positive_candidates:
+                return max(positive_candidates, key=len).strip()
+
+            if candidates:
+                return max(candidates, key=len).strip()
 
             return ""
     except Exception as e:
