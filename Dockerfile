@@ -1,5 +1,8 @@
 FROM python:3.12-slim
 
+# Prevent Python from buffering stdout and stderr
+ENV PYTHONUNBUFFERED=1
+
 # Install dependencies
 WORKDIR /app
 COPY requirements.txt .

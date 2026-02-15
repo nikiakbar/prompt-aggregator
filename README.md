@@ -16,6 +16,7 @@ A Python application with a Gradio UI designed to aggregate Stable Diffusion pos
   - **Rename**: Easily rename individual tags while preserving counts.
 - **Wildcard Export**: Generates a sorted list of unique tags for use as a wildcard file.
 - **State Persistence**: Save and Load current progress to/from `/data/state.json` to prevent data loss on disconnection or browser refresh.
+- **Robust Logging**: Real-time logging of application state and operations to container output, with unbuffered output for immediate visibility.
 
 ## Prerequisites
 
@@ -44,9 +45,10 @@ A Python application with a Gradio UI designed to aggregate Stable Diffusion pos
    - Select rows to **Delete**.
    - Select a single row to **Rename**.
    - Edit the **Tag** text directly in the table for quick corrections.
-4. **Persistence**:
+4. **Persistence & Verification**:
    - Click **Save State** to preserve your current tag counts to `/data/state.json`.
    - Click **Load State** to restore previously saved data.
+   - Click **Test Log Output** to send a series of test messages to your container logs (useful for verifying log visibility).
 5. **Export**: Click **Export Wildcard List** to save your unique tags to `/data/wildcard.txt` inside the container (mapped to your host's `./data` folder).
 
 ## Configuration

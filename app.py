@@ -8,11 +8,12 @@ from parser import parse_prompt
 from aggregator import aggregate_tags
 from editor import delete_tags, rename_tag, merge_tags
 
-# Configure logging
+# Configure logging for the root logger to capture all module output
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[logging.StreamHandler(sys.stdout)]
+    format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
+    handlers=[logging.StreamHandler(sys.stdout)],
+    force=True  # Overrides any existing logging configuration (e.g. from libraries)
 )
 logger = logging.getLogger("prompt-aggregator")
 
@@ -150,6 +151,14 @@ def save_app_state(tag_counts):
         logger.error(f"Save state failed: {e}")
         return f"Save failed: {e}"
 
+def test_log_output():
+    logger.info("--- LOG TEST START ---")
+    logger.info("This is a test log message at INFO level.")
+    logger.warning("This is a test log message at WARNING level.")
+    logger.error("This is a test log message at ERROR level.")
+    logger.info("--- LOG TEST END ---")
+    return "Log messages sent to stdout. Check your container logs."
+
 def load_app_state():
     state_path = "/data/state.json"
     if not os.path.exists(state_path):
@@ -210,6 +219,8 @@ with gr.Blocks(title="SD Prompt Tag Aggregator") as demo:
             export_btn = gr.Button("Export Wildcard List", variant="primary")
             save_state_btn = gr.Button("Save State", variant="secondary")
             load_state_btn = gr.Button("Load State", variant="secondary")
+        with gr.Row():
+            test_log_btn = gr.Button("Test Log Output", variant="secondary")
         export_status = gr.Markdown("")
 
     # Event Handlers
@@ -273,12 +284,21 @@ with gr.Blocks(title="SD Prompt Tag Aggregator") as demo:
         outputs=[tag_counts_state, tag_table, preview_area, export_status]
     )
 
+    test_log_btn.click(
+        test_log_output,
+        outputs=[export_status]
+    )
+
 if __name__ == "__main__":
     SERVER_NAME = "0.0.0.0"
     PORT = 4000
+
+    # Ensure logs are visible immediately
+    print("Initializing Application...", flush=True)
     logger.info("Starting Stable Diffusion Prompt Tag Aggregator")
     logger.info(f"Configuration: SERVER_NAME={SERVER_NAME}, PORT={PORT}")
     logger.info("Input volume mount expected at: /input")
     logger.info("Output volume mount expected at: /data")
+    logger.info("Python version: " + sys.version)
 
     demo.launch(server_name=SERVER_NAME, server_port=PORT)

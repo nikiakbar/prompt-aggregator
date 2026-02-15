@@ -34,5 +34,5 @@
 - CI/CD: GitHub Actions for Docker Hub push with branch-based tagging.
 
 ### 5. Logging & Persistence
-- Logging: Centralized logging with startup configuration output to stdout.
+- Logging: Centralized logging with startup configuration output to stdout. Using `ENV PYTHONUNBUFFERED=1` and `force=True` in `logging.basicConfig` to ensure immediate visibility in Docker logs. Added "Test Log Output" button.
 - State Persistence: Ability to Save/Load current state (tag counts) to/from `/data/state.json`.
