@@ -8,7 +8,7 @@
 - Recursive image scanning.
 
 ## Functional Directives
-- Extract **ONLY positive prompt** from metadata (A1111, ComfyUI, InvokeAI, etc.).
+- Extract **ONLY positive prompt** from metadata (A1111 format only).
 - Ignore negative prompts and technical parameters (Steps, Sampler, CFG, etc.).
 - Preserve phrase order.
 - Preserve LoRA tags (`<lora:name:weight>`) as requested by user.
@@ -20,12 +20,13 @@
 
 ## Technical Implementations
 - **Modular Structure:** `loader.py` (extraction), `parser.py` (normalization), `aggregator.py` (counting), `editor.py` (logic), `app.py` (UI).
-- **Efficiency:** Uses lazy generators for directory scanning. Two-pass processing to show accurate progress bars for large datasets (47k+ images).
+- **Efficiency:** Uses lazy generators for directory scanning. Two-pass processing to show accurate progress bars.
 - **Logging:** Centralized logging to `stdout` with `PYTHONUNBUFFERED=1` and `force=True` root logger config for Docker visibility.
-- **Robustness:** Handles binary/jumbled metadata with `is_printable` checks and multiple EXIF decodings.
-- **CI/CD:** GitHub Actions workflow with Buildx caching and Public ECR mirror for base image to avoid rate limits.
+- **Robustness:** Handles binary/jumbled metadata with `piexif` for JPEG/WebP EXIF and standard `img.info` for PNG.
+- **CI/CD:** GitHub Actions workflow with Buildx caching and Public ECR mirror for base image.
 
 ## Key Heuristics
-- `is_likely_negative`: Identifies negative prompts by common keywords (lowres, bad anatomy, etc.).
+- **A1111 Only:** strictly parses "parameters" (PNG) or UserComment (JPEG).
+- `is_likely_negative`: Identifies negative prompts by common keywords (lowres, bad anatomy, etc.), excluding generic words.
 - `PARAMETER_PREFIXES`: Filters out common A1111 parameters that might appear in metadata fields.
-- `decode_metadata_value`: Handles ASCII and UNICODE (UTF-16) EXIF prefixes.
+- **EXIF Handling:** Uses `piexif` to robustly decode UserComment fields (often UNICODE).

@@ -1,3 +1,4 @@
 gradio
 Pillow
 pandas
+piexif

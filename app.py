@@ -34,7 +34,7 @@ def process_path(path, progress=gr.Progress()):
         return f"Current active path: {path}", 0, [], "", {}
 
     tag_counts = {}
-    batch_size = 100
+    batch_size = 10
 
     # Second pass: lazy iteration for processing
     for i, f in enumerate(get_image_files_generator(path)):

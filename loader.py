@@ -1,10 +1,9 @@
 import os
 import logging
-import json
 import re
+import piexif
+import piexif.helper
 from PIL import Image
-from PIL.ExifTags import TAGS
-from parser import is_printable, clean_text
 
 logger = logging.getLogger(__name__)
 
@@ -12,7 +11,7 @@ SUPPORTED_EXTENSIONS = ('.png', '.webp', '.jpg', '.jpeg')
 
 # Keywords commonly found in negative prompts
 NEGATIVE_KEYWORDS = [
-    'lowres', 'bad anatomy', 'bad hands', 'text', 'error', 'missing fingers',
+    'lowres', 'bad anatomy', 'bad hands', 'missing fingers',
     'extra digit', 'fewer digits', 'cropped', 'worst quality', 'low quality',
     'normal quality', 'jpeg artifacts', 'signature', 'watermark', 'username',
     'blurry', 'bad feet', 'easynegative', 'ng_deepnegative', 'bad-hands-5',
@@ -33,157 +32,142 @@ def is_likely_negative(text):
     # If it contains many negative keywords, it's likely negative
     return match_count >= 2
 
-def decode_metadata_value(value):
-    """Robustly decodes metadata values (bytes/strings) into clean UTF-8 strings."""
-    if isinstance(value, bytes):
-        # Common EXIF encoding prefixes
-        if value.startswith(b'ASCII\x00\x00\x00'):
+def decode_exif_user_comment(user_comment):
+    """
+    Decodes the UserComment field from EXIF data using smart heuristics.
+    Handles Little Endian vs Big Endian UTF-16 to avoid Mojibake (Chinese characters).
+    """
+    if not user_comment:
+        return ""
+
+    try:
+        if isinstance(user_comment, bytes):
+            # Debug log
+            if len(user_comment) > 50:
+                 logger.debug(f"Decoding UserComment bytes (partial): {user_comment[:50].hex()}")
+
+            # 1. Handle UNICODE prefix
+            if user_comment.startswith(b'UNICODE\x00'):
+                payload = user_comment[8:]
+                
+                # Try both LE and BE, pick the one that looks like English/ASCII
+                # This works because A1111 prompts are mostly ASCII + English punctuation
+                candidates = []
+                for enc in ['utf-16le', 'utf-16be', 'utf-16']:
+                    try:
+                        decoded = payload.decode(enc)
+                        # Score: Count printable ASCII/English chars
+                        # Count standard printable ASCII (32-126) and newline/tab
+                        # Mojibake will be mostly >127
+                        score = sum(1 for c in decoded if 32 <= ord(c) <= 126 or c in '\n\r\t')
+                        candidates.append((score, decoded))
+                        # If almost perfect ASCII score, we can stop early
+                        if score > len(payload)/2 * 0.9: # UTF-16 is 2 bytes per char
+                             return decoded.strip()
+                    except:
+                        pass
+                
+                if candidates:
+                    # Return the one with the highest ASCII score
+                    candidates.sort(key=lambda x: x[0], reverse=True)
+                    best_score, best_decoded = candidates[0]
+                    # Log if it was confusing (e.g. low score)
+                    if best_decoded and best_score < len(best_decoded) * 0.5:
+                         logger.warning(f"Low confidence decode ({best_score}/{len(best_decoded)} ASCII chars): {best_decoded[:30]}...")
+                    return best_decoded.strip()
+            
+            # 2. Handle ASCII prefix or raw
+            if user_comment.startswith(b'ASCII\x00\x00\x00'):
+                return user_comment[8:].decode('utf-8', errors='ignore').strip()
+            
+            # 3. Fallback / piexif helper
             try:
-                return value[8:].decode('utf-8', errors='ignore').strip()
+                # Piexif's load is decent generally
+                return piexif.helper.UserComment.load(user_comment)
             except:
                 pass
-        if value.startswith(b'UNICODE\x00'):
-            # UNICODE prefix is 8 bytes.
-            for enc in ['utf-16', 'utf-8']:
-                try:
-                    return value[8:].decode(enc, errors='ignore').strip()
-                except:
-                    continue
-        # Fallback decodings
-        for enc in ['utf-8', 'latin-1', 'cp1252']:
-            try:
-                decoded = value.decode(enc).strip()
-                if is_printable(decoded):
-                    return decoded
-            except:
-                continue
-        return value.decode('utf-8', errors='ignore').strip()
-    return str(value).strip()
+            
+            # 4. Last resort: UTF-8
+            return user_comment.decode('utf-8', errors='ignore').strip()
+
+    except Exception as e:
+        logger.warning(f"Failed to decode UserComment: {e}")
+        pass
+
+    return str(user_comment).strip()
+
+def extract_a1111_params(param_str):
+    """
+    Extracts the positive prompt from an A1111 parameter string.
+    Format: Positive Prompt \n Positive Prompt \n Negative Prompt: ... \n Steps: ...
+    """
+    if not param_str:
+        return ""
+        
+    # Standard line-based parsing
+    lines = param_str.strip().split('\n')
+    positive_lines = []
+    
+    for line in lines:
+        line_lower = line.lower()
+        # stop if we hit negative prompt or steps
+        if line_lower.startswith('negative prompt:') or line_lower.startswith('steps:'):
+            break
+        positive_lines.append(line)
+        
+    prompt = " ".join(positive_lines).strip()
+    
+    # Just in case the split didn't catch inline "Negative prompt:" (rare but possible in badly formatted metadata)
+    if 'negative prompt:' in prompt.lower():
+        prompt = re.split(r'negative prompt:', prompt, flags=re.IGNORECASE)[0]
+        
+    return prompt.strip()
 
 def extract_prompt(image_path):
     """
     Robustly extracts ONLY the positive prompt from image metadata.
-    Specifically designed to ignore negative prompts and technical parameters.
+    Strictly focuses on A1111 format using PNGInfo or EXIF UserComment via piexif.
     """
     try:
-        with Image.open(image_path) as img:
-            info = img.info
-            all_metadata = {}
-
-            # 1. Collect from img.info (PNG, WebP chunks)
-            for k, v in info.items():
-                try:
-                    key = k.decode('utf-8', errors='ignore').lower() if isinstance(k, bytes) else str(k).lower()
-                    val = decode_metadata_value(v)
-                    if val and is_printable(val):
-                        all_metadata[key] = val
-                except:
-                    continue
-
-            # 2. Collect from EXIF (JPEG, WebP)
+        img = Image.open(image_path)
+        
+        # Strategy 1: PNG Info (parameters key)
+        # Usage: PNG, WebP
+        if img.info and 'parameters' in img.info:
+            return extract_a1111_params(img.info['parameters'])
+            
+        # Strategy 2: EXIF UserComment via piexif
+        # Usage: JPEG, WebP (sometimes)
+        if 'exif' in img.info:
             try:
-                exif = img.getexif()
-                if exif:
-                    for tag_id, value in exif.items():
-                        tag_name = TAGS.get(tag_id, tag_id)
-                        if isinstance(tag_name, str):
-                            key = tag_name.lower()
-                            val = decode_metadata_value(value)
-                            if val and is_printable(val):
-                                all_metadata[key] = val
-            except:
+                exif_dict = piexif.load(img.info['exif'])
+                # 0x9286 is UserComment
+                if piexif.ExifIFD.UserComment in exif_dict.get('Exif', {}):
+                    user_comment = exif_dict['Exif'][piexif.ExifIFD.UserComment]
+                    decoded_comment = decode_exif_user_comment(user_comment)
+                    if decoded_comment:
+                        return extract_a1111_params(decoded_comment)
+            except Exception:
                 pass
 
-            if not all_metadata:
-                return ""
+        # Strategy 3: Fallback standard Image.getexif for JPEGs if piexif fail/not used
+        # (Though piexif handles most, sometimes PIL's getexif is simpler for base tags)
+        # 0x9286 = 37510 = UserComment
+        exif = img.getexif()
+        if exif:
+            # check for UserComment
+            if 37510 in exif:
+                return extract_a1111_params(decode_exif_user_comment(exif[37510]))
+            
+            # check for ImageDescription (0x010e = 270) - some tools put params there
+            if 270 in exif:
+                 return extract_a1111_params(str(exif[270]))
 
-            # 3. Strategy: Look for A1111-style parameters string in ALL metadata
-            # We want to find the one that has the standard A1111 format first.
-            for key, val in all_metadata.items():
-                v_lower = val.lower()
-                # A1111 format check
-                if 'negative prompt:' in v_lower or 'steps:' in v_lower:
-                    # Split aggressively
-                    # First part is positive prompt
-                    pos_part = val
-                    if 'negative prompt:' in v_lower:
-                        pos_part = re.split(r'negative prompt:', pos_part, flags=re.IGNORECASE)[0]
-                    if 'steps:' in pos_part.lower():
-                        pos_part = re.split(r'steps:', pos_part, flags=re.IGNORECASE)[0]
-
-                    pos_part = pos_part.strip()
-                    if pos_part:
-                        return pos_part
-
-            # 4. Strategy: Look for ComfyUI/JSON
-            for key in ['prompt', 'workflow', 'sd_metadata', 'sd-metadata', 'metadata']:
-                val = all_metadata.get(key)
-                if val and val.strip().startswith('{'):
-                    try:
-                        data = json.loads(val)
-                        if isinstance(data, dict):
-                            candidates = []
-                            for node in data.values():
-                                if isinstance(node, dict) and 'inputs' in node:
-                                    inputs = node['inputs']
-                                    txt = inputs.get('text') or inputs.get('string')
-                                    if isinstance(txt, str) and len(txt) > 3:
-                                        # Filter out obviously technical stuff, BUT keep LoRAs if they are in the prompt
-                                        if not any(x in txt.lower() for x in ['embedding:', 'checkpoint']):
-                                            candidates.append(txt)
-
-                            if candidates:
-                                # Filter out likely negative candidates
-                                positive_candidates = [c for c in candidates if not is_likely_negative(c)]
-                                if positive_candidates:
-                                    return max(positive_candidates, key=len).strip()
-                                return max(candidates, key=len).strip()
-
-                            if 'positive_prompt' in data:
-                                return str(data['positive_prompt']).strip()
-                    except:
-                        pass
-
-            # 5. Strategy: Check priority keys for plain text, but be VERY picky
-            priority_keys = ['parameters', 'prompt', 'description', 'comment', 'usercomment', 'dream', 'software']
-            for key in priority_keys:
-                val = all_metadata.get(key)
-                if val:
-                    # InvokeAI legacy
-                    if '--' in val and any(x in val for x in ['--steps', '--cfg', '--seed']):
-                        return val.split('--')[0].strip()
-
-                    if not (val.startswith('{') or val.startswith('[')):
-                        # Ensure it's not a parameter block or negative prompt
-                        if len(val) > 2 and not is_likely_negative(val):
-                            # Check if it looks like a parameter block (e.g. starts with Steps:)
-                            if not any(val.lower().startswith(p) for p in ['steps:', 'sampler:', 'seed:']):
-                                return val.strip()
-
-            # 6. Fallback: return the longest printable string that doesn't look like a negative or params
-            candidates = [v for v in all_metadata.values() if not (v.startswith('{') or v.startswith('['))]
-            candidates = [v for v in candidates if len(v.split()) > 1 and is_printable(v)]
-
-            # Filter candidates
-            valid_candidates = [c for c in candidates if not is_likely_negative(c) and not any(c.lower().startswith(p) for p in ['steps:', 'sampler:'])]
-
-            if valid_candidates:
-                return max(valid_candidates, key=len).strip()
-
-            return ""
+        return ""
+        
     except Exception as e:
         logger.error(f"Error extracting prompt from {image_path}: {e}")
         return ""
-
-def get_image_files(directory):
-    """Returns a list of supported image files in the directory recursively."""
-    files = []
-    if os.path.isdir(directory):
-        for root, dirs, filenames in os.walk(directory):
-            for f in filenames:
-                if f.lower().endswith(SUPPORTED_EXTENSIONS):
-                    files.append(os.path.join(root, f))
-    return files
 
 def get_image_files_generator(directory):
     """Yields supported image files in the directory recursively (lazy iteration)."""
