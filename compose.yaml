@@ -1,0 +1,11 @@
+services:
+  prompt-aggregator:
+    build: .
+    ports:
+      - "4000:4000"
+    volumes:
+      # host folder ./input -> container /input (Input source for images)
+      - ./input:/input
+      # host folder ./data -> container /data (Destination for exported wildcard.txt)
+      - ./data:/data
+    restart: unless-stopped

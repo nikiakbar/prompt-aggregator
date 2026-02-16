@@ -1,0 +1,13 @@
+2026-02-15 03:10:10,501 [INFO] httpx: HTTP Request: HEAD https://huggingface.co/api/telemetry/https%3A/api.gradio.app/gradio-initiated-analytics "HTTP/1.1 200 OK"
+2026-02-15 03:10:10,601 [INFO] httpx: HTTP Request: GET https://api.gradio.app/pkg-version "HTTP/1.1 200 OK"
+Initializing Application...
+2026-02-15 03:10:10,959 [INFO] prompt-aggregator: Starting Stable Diffusion Prompt Tag Aggregator
+2026-02-15 03:10:10,959 [INFO] prompt-aggregator: Configuration: SERVER_NAME=0.0.0.0, PORT=4000
+2026-02-15 03:10:10,959 [INFO] prompt-aggregator: Input volume mount expected at: /input
+2026-02-15 03:10:10,959 [INFO] prompt-aggregator: Output volume mount expected at: /data
+2026-02-15 03:10:10,959 [INFO] prompt-aggregator: Python version: 3.12.12 (main, Jan 18 2026, 06:09:15) [GCC 13.3.0]
+* Running on local URL:  http://0.0.0.0:4000
+2026-02-15 03:10:11,204 [INFO] httpx: HTTP Request: GET http://localhost:4000/gradio_api/startup-events "HTTP/1.1 200 OK"
+2026-02-15 03:10:11,231 [INFO] httpx: HTTP Request: HEAD http://localhost:4000/ "HTTP/1.1 200 OK"
+* To create a public link, set `share=True` in `launch()`.
+2026-02-15 03:10:11,291 [INFO] httpx: HTTP Request: HEAD https://huggingface.co/api/telemetry/https%3A/api.gradio.app/gradio-launched-telemetry "HTTP/1.1 200 OK"
