@@ -23,8 +23,14 @@ def is_likely_negative(text):
     """Heuristic to check if a string is likely a negative prompt."""
     if not text:
         return False
-    text_lower = text.lower()
+    text_lower = text.lower().strip()
+
+    # If it starts with "negative prompt:", it definitely is one
+    if text_lower.startswith('negative prompt:'):
+        return True
+
     match_count = sum(1 for word in NEGATIVE_KEYWORDS if word in text_lower)
+    # If it contains many negative keywords, it's likely negative
     return match_count >= 2
 
 def decode_metadata_value(value):
@@ -32,13 +38,17 @@ def decode_metadata_value(value):
     if isinstance(value, bytes):
         # Common EXIF encoding prefixes
         if value.startswith(b'ASCII\x00\x00\x00'):
-            return value[8:].decode('utf-8', errors='ignore').strip()
-        if value.startswith(b'UNICODE\x00'):
-            # UNICODE prefix is 8 bytes. The rest is usually UTF-16.
             try:
-                return value[8:].decode('utf-16', errors='ignore').strip()
-            except:
                 return value[8:].decode('utf-8', errors='ignore').strip()
+            except:
+                pass
+        if value.startswith(b'UNICODE\x00'):
+            # UNICODE prefix is 8 bytes.
+            for enc in ['utf-16', 'utf-8']:
+                try:
+                    return value[8:].decode(enc, errors='ignore').strip()
+                except:
+                    continue
         # Fallback decodings
         for enc in ['utf-8', 'latin-1', 'cp1252']:
             try:
@@ -66,7 +76,7 @@ def extract_prompt(image_path):
                     key = k.decode('utf-8', errors='ignore').lower() if isinstance(k, bytes) else str(k).lower()
                     val = decode_metadata_value(v)
                     if val and is_printable(val):
-                        all_metadata[key] = clean_text(val)
+                        all_metadata[key] = val
                 except:
                     continue
 
@@ -80,23 +90,30 @@ def extract_prompt(image_path):
                             key = tag_name.lower()
                             val = decode_metadata_value(value)
                             if val and is_printable(val):
-                                all_metadata[key] = clean_text(val)
+                                all_metadata[key] = val
             except:
                 pass
 
             if not all_metadata:
                 return ""
 
-            # 3. Strategy: Look for A1111-style parameters string
+            # 3. Strategy: Look for A1111-style parameters string in ALL metadata
+            # We want to find the one that has the standard A1111 format first.
             for key, val in all_metadata.items():
                 v_lower = val.lower()
+                # A1111 format check
                 if 'negative prompt:' in v_lower or 'steps:' in v_lower:
+                    # Split aggressively
+                    # First part is positive prompt
+                    pos_part = val
                     if 'negative prompt:' in v_lower:
-                        parts = re.split(r'negative prompt:', val, flags=re.IGNORECASE)
-                        return parts[0].strip()
-                    if 'steps:' in v_lower:
-                        parts = re.split(r'steps:', val, flags=re.IGNORECASE)
-                        return parts[0].strip()
+                        pos_part = re.split(r'negative prompt:', pos_part, flags=re.IGNORECASE)[0]
+                    if 'steps:' in pos_part.lower():
+                        pos_part = re.split(r'steps:', pos_part, flags=re.IGNORECASE)[0]
+
+                    pos_part = pos_part.strip()
+                    if pos_part:
+                        return pos_part
 
             # 4. Strategy: Look for ComfyUI/JSON
             for key in ['prompt', 'workflow', 'sd_metadata', 'sd-metadata', 'metadata']:
@@ -111,10 +128,12 @@ def extract_prompt(image_path):
                                     inputs = node['inputs']
                                     txt = inputs.get('text') or inputs.get('string')
                                     if isinstance(txt, str) and len(txt) > 3:
-                                        if not any(x in txt.lower() for x in ['embedding:', 'checkpoint', 'lora:']):
+                                        # Filter out obviously technical stuff, BUT keep LoRAs if they are in the prompt
+                                        if not any(x in txt.lower() for x in ['embedding:', 'checkpoint']):
                                             candidates.append(txt)
 
                             if candidates:
+                                # Filter out likely negative candidates
                                 positive_candidates = [c for c in candidates if not is_likely_negative(c)]
                                 if positive_candidates:
                                     return max(positive_candidates, key=len).strip()
@@ -125,28 +144,31 @@ def extract_prompt(image_path):
                     except:
                         pass
 
-            # 5. Strategy: Check priority keys for plain text
+            # 5. Strategy: Check priority keys for plain text, but be VERY picky
             priority_keys = ['parameters', 'prompt', 'description', 'comment', 'usercomment', 'dream', 'software']
             for key in priority_keys:
                 val = all_metadata.get(key)
                 if val:
+                    # InvokeAI legacy
                     if '--' in val and any(x in val for x in ['--steps', '--cfg', '--seed']):
                         return val.split('--')[0].strip()
 
                     if not (val.startswith('{') or val.startswith('[')):
+                        # Ensure it's not a parameter block or negative prompt
                         if len(val) > 2 and not is_likely_negative(val):
-                            return val.strip()
+                            # Check if it looks like a parameter block (e.g. starts with Steps:)
+                            if not any(val.lower().startswith(p) for p in ['steps:', 'sampler:', 'seed:']):
+                                return val.strip()
 
-            # 6. Fallback: return the longest printable string that doesn't look negative
+            # 6. Fallback: return the longest printable string that doesn't look like a negative or params
             candidates = [v for v in all_metadata.values() if not (v.startswith('{') or v.startswith('['))]
             candidates = [v for v in candidates if len(v.split()) > 1 and is_printable(v)]
 
-            positive_candidates = [c for c in candidates if not is_likely_negative(c)]
-            if positive_candidates:
-                return max(positive_candidates, key=len).strip()
+            # Filter candidates
+            valid_candidates = [c for c in candidates if not is_likely_negative(c) and not any(c.lower().startswith(p) for p in ['steps:', 'sampler:'])]
 
-            if candidates:
-                return max(candidates, key=len).strip()
+            if valid_candidates:
+                return max(valid_candidates, key=len).strip()
 
             return ""
     except Exception as e:

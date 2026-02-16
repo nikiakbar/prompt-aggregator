@@ -1,38 +1,31 @@
-# AI Context - Prompt Aggregator
+# AI Context - Prompt Aggregator Project
 
-## Core Instructions
-- Always update `README.md` and `aicontext.md` when adding new features.
+## Core Requirements
+- Python 3.12 + Gradio
+- Dockerized (port 4000)
+- Volume mounts: `./input` -> `/input` (source), `./data` -> `/data` (output)
+- Supported formats: `.png`, `.webp`, `.jpg`, `.jpeg`
+- Recursive image scanning.
 
-## Requested Features
+## Functional Directives
+- Extract **ONLY positive prompt** from metadata (A1111, ComfyUI, InvokeAI, etc.).
+- Ignore negative prompts and technical parameters (Steps, Sampler, CFG, etc.).
+- Preserve phrase order.
+- Preserve LoRA tags (`<lora:name:weight>`) as requested by user.
+- Normalize tags: lowercase, trim, remove weights (except for LoRAs).
+- Split by comma.
+- Interactive UI: Merge, Rename, Delete, Inline Edit.
+- Export to `/data/wildcard.txt`.
+- Persistence: Save/Load state to `/data/state.json`.
 
-### 1. General Requirements
-- Language: Python 3.12
-- UI: Gradio
-- Runtime: Docker
-- Input: Filesystem path inside container
-- Supported Formats: .png, .webp, .jpg, .jpeg
-- Port: 4000
+## Technical Implementations
+- **Modular Structure:** `loader.py` (extraction), `parser.py` (normalization), `aggregator.py` (counting), `editor.py` (logic), `app.py` (UI).
+- **Efficiency:** Uses lazy generators for directory scanning. Two-pass processing to show accurate progress bars for large datasets (47k+ images).
+- **Logging:** Centralized logging to `stdout` with `PYTHONUNBUFFERED=1` and `force=True` root logger config for Docker visibility.
+- **Robustness:** Handles binary/jumbled metadata with `is_printable` checks and multiple EXIF decodings.
+- **CI/CD:** GitHub Actions workflow with Buildx caching and Public ECR mirror for base image to avoid rate limits.
 
-### 2. Functional Behavior
-- Input: Directory path string.
-- Metadata Extraction: Use Pillow to extract positive prompts from 'parameters' or 'prompt' keys.
-- Normalization: Lowercase, trim, remove SD weights (e.g., `(word:1.2)`).
-- Recursive Scanning: Scan directories recursively for images.
-- Memory Management: Lazy iteration over files, optional batch processing (100 images).
-- Progress: Show processed/total in UI and logs.
-
-### 3. UI Requirements
-- Section A - Input: Path, Process button, Path/Count display.
-- Section B - Tag Table: | Select | Tag | Count |.
-  - Features: Sort by count, inline edit, multi-select.
-  - Operations: Merge, Delete, Rename.
-- Section C - Output: Preview, Export to file (`/data/wildcard.txt`).
-
-### 4. Docker & CI/CD
-- Base Image: python:3.12-slim
-- Volume Mounts: `./input:/input`, `./data:/data`
-- CI/CD: GitHub Actions for Docker Hub push with branch-based tagging.
-
-### 5. Logging & Persistence
-- Logging: Centralized logging with startup configuration output to stdout. Using `ENV PYTHONUNBUFFERED=1` and `force=True` in `logging.basicConfig` to ensure immediate visibility in Docker logs. Added "Test Log Output" button.
-- State Persistence: Ability to Save/Load current state (tag counts) to/from `/data/state.json`.
+## Key Heuristics
+- `is_likely_negative`: Identifies negative prompts by common keywords (lowres, bad anatomy, etc.).
+- `PARAMETER_PREFIXES`: Filters out common A1111 parameters that might appear in metadata fields.
+- `decode_metadata_value`: Handles ASCII and UNICODE (UTF-16) EXIF prefixes.

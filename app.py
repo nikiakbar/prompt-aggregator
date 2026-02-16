@@ -41,13 +41,14 @@ def process_path(path, progress=gr.Progress()):
         prompt = extract_prompt(f)
         tags = parse_prompt(prompt)
 
-        # Update counts immediately (effectively batch processing if we yield/update UI in batches)
+        # Update counts
         for tag in tags:
             tag_counts[tag] = tag_counts.get(tag, 0) + 1
 
         # Update progress and log in batches
         if (i + 1) % batch_size == 0 or (i + 1) == total_files:
-            progress((i + 1) / total_files, desc=f"Processed {i + 1}/{total_files}")
+            if progress:
+                progress((i + 1) / total_files, desc=f"Processed {i + 1}/{total_files}")
             logger.info(f"Progress: {i + 1}/{total_files} images processed")
 
     # Sort by count descending initially
@@ -224,8 +225,8 @@ with gr.Blocks(title="SD Prompt Tag Aggregator") as demo:
         export_status = gr.Markdown("")
 
     # Event Handlers
-    def on_process_click(path):
-        act_path, img_count, df_data, preview, tag_counts = process_path(path)
+    def on_process_click(path, progress=gr.Progress()):
+        act_path, img_count, df_data, preview, tag_counts = process_path(path, progress=progress)
         return act_path, img_count, df_data, preview, tag_counts
 
     process_btn.click(
